@@ -1,0 +1,20 @@
+# Local schedules, notes, AI inboxes and backups
+data/
+state*.json
+*.backup
+*.bak
+
+# Build and editor output; Windows downloads are published in Releases
+bin/
+obj/
+*.exe
+*.pdb
+*.zip
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Machine-local credentials and environment settings
+.env
+.env.*

@@ -1,0 +1,10 @@
+{
+  "id": "daydesk-example-note-v1",
+  "source": "示例导入",
+  "operations": [
+    {
+      "type": "add_note",
+      "text": "这是一条示例便利贴。以后可以把每日记录交给 AI 整理，在这里预览后应用。"
+    }
+  ]
+}
