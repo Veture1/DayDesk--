@@ -15,13 +15,11 @@ public static class Program {
     [STAThread] public static void Main(string[] args) {
         string dir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"data");
         for(int i=0;i<args.Length-1;i++)if(args[i]=="--data")dir=Path.GetFullPath(args[i+1]);
-        bool acquired=false;
-        string mutexName="Local\\DayDesk_"+BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(dir.ToLowerInvariant()))).Replace("-","");
-        using(var mutex=new Mutex(true,mutexName,out acquired)) {
-            if(!acquired){MessageBox.Show("日程已经在运行，请切换到已打开的窗口。","日程 · DayDesk");return;}
+        using(var instance=new AppInstance(dir)) {
+            if(!instance.IsOwner){if(!instance.ActivateExisting())MessageBox.Show("当前运行的可能是旧版日程。请从屏幕右侧的日程标签或系统托盘退出一次，再打开新版。","日程 · DayDesk");return;}
             try {
                 var app=new Application{ShutdownMode=ShutdownMode.OnMainWindowClose}; app.DispatcherUnhandledException+=(s,e)=>{MessageBox.Show(e.Exception.Message,"日程 · 操作未完成");e.Handled=true;};
-                var store=new DeskStore(dir); app.Run(new MainWindow(store));
+                var store=new DeskStore(dir);var main=new MainWindow(store);instance.Attach(main);using(var tray=new DesktopTray(main))app.Run(main);
             }catch(Exception ex){MessageBox.Show("无法打开日程："+ex.Message+"\n请确认程序文件夹可以写入。","日程 · DayDesk");}
         }
     }
@@ -39,8 +37,9 @@ public class MainWindow:Window {
         inboxTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};inboxTimer.Tick+=(s,e)=>{RefreshInbox();UpdateAgenda();if(DateTime.Today!=lastDay){bool wasToday=selected==lastDay;lastDay=DateTime.Today;if(wasToday){FlushNotes();selected=DateTime.Today;Render();}}};inboxTimer.Start();
         Closing+=(s,e)=>{try{FlushNotes();store.Save();inboxTimer.Stop();}catch(Exception ex){e.Cancel=true;UI.Toast(this,"保存失败，窗口暂未关闭："+ex.Message);}};
         SizeChanged+=(s,e)=>Reflow();
-        Loaded+=(s,e)=>{drawer=new DrawerController(this,()=>FlushNotes());if(!String.IsNullOrEmpty(store.RecoveryMessage))UI.Toast(this,store.RecoveryMessage);};
+        Loaded+=(s,e)=>{if(drawer==null)drawer=new DrawerController(this,()=>FlushNotes());if(!String.IsNullOrEmpty(store.RecoveryMessage))UI.Toast(this,store.RecoveryMessage);};
     }
+    public void Reveal(){if(drawer!=null)drawer.Expand();else{DockRight();Show();Activate();}}
     void DockRight(bool wide=false){WindowState=WindowState.Normal;var a=SystemParameters.WorkArea;Width=Math.Min(a.Width-24,wide?Math.Max(480,a.Width/3):500);Height=Math.Min(wide?a.Height-24:760,a.Height-24);Left=a.Right-Width-12;Top=a.Top+(a.Height-Height)/2;}
     void Build(){
         root=new Grid{Margin=new Thickness(24,18,24,12)};Content=root;
@@ -86,7 +85,7 @@ public class MainWindow:Window {
         tracks.Children.Clear();
         if(store.State.Tracks.Count==0){var blank=UI.Stack(UI.Text("你的目标，你来定义",16,UI.Ink,true),UI.Text("学英语、健身、论文……\n把一条主线拆成几个节点。",12,UI.Muted));blank.Margin=new Thickness(4,10,4,18);tracks.Children.Add(blank);tracks.Children.Add(UI.Button("＋ 创建第一条主线",()=>{FlushNotes();Dialogs.ShowTracks(this,store);Render();},true));}
         foreach(var tr in store.State.Tracks){var track=tr;var current=track.Nodes.FirstOrDefault(n=>n.Status=="current");string pos=current!=null?current.Title:(track.Nodes.Count==0?"添加路线节点":(track.Nodes.All(n=>n.Status=="done")?"本轮已完成":"选择当前节点"));
-            var text=UI.Stack(UI.Text(track.Title,11,UI.Muted),UI.Text(pos+"  ›",14,UI.Ink,true));var card=UI.Card(text,"#FFFFFF",12);card.Margin=new Thickness(0,0,2,9);card.BorderBrush=UI.Brush(track.Color??"#E3E9DE");card.Cursor=Cursors.Hand;card.MouseLeftButtonUp+=(s,e)=>{FlushNotes();Dialogs.ShowTrack(this,store,track);Render();};tracks.Children.Add(card);}
+            var text=UI.Stack(UI.Text(track.Title,11,UI.Muted),UI.Text(pos+"  ›",14,UI.Ink,true));if(track.ApplicationsEnabled)text.Children.Add(UI.Text(DeskStore.ApplicationSummary(track),10,UI.Muted));var card=UI.Card(text,"#FFFFFF",12);card.Margin=new Thickness(0,0,2,9);card.BorderBrush=UI.Brush(track.Color??"#E3E9DE");card.Cursor=Cursors.Hand;card.MouseLeftButtonUp+=(s,e)=>{FlushNotes();Dialogs.ShowTrack(this,store,track);Render();};tracks.Children.Add(card);}
         UpdateAgenda();
         notes.Children.Clear();var noteList=store.State.Notes.Where(n=>n.Date==SelectedDate||n.Pinned).OrderByDescending(n=>n.Pinned).ToList();if(noteList.Count==0){var n=UI.Stack(UI.Text("让想法先落在这里。",21,UI.Brush("#879282"),true),UI.Text("灵感、复盘，或者明天想尝试的事。",12,UI.Muted));n.Margin=new Thickness(12,32,12,0);notes.Children.Add(n);}
         foreach(var note in noteList)notes.Children.Add(NoteCard(note));Reflow();RefreshInbox();

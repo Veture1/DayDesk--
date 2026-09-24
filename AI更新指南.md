@@ -64,6 +64,8 @@
 |---|---|---|
 | `add_track` | `title` | `nodes` 为初始节点名称的字符串数组，可省略或为空数组 |
 | `rename_track` | `trackId`、`title` | 修改主线名称 |
+| `upsert_application` | `trackId`、`company`、`status` | 状态取 `planned`（待投）、`applied`（已投）、`assessment`（笔试）、`interview`（面试）、`offer`、`rejected`（未通过）、`watch`（观望）、`no_response`（暂无回复）。可选 `applicationId`、`role`、`appliedDate`（yyyy-MM-dd 或空）、`notes`。不提供 ID 时按同一主线的公司与岗位匹配并更新，找不到才新增。缺少的日期不得猜测。 |
+| `set_applications_source` | `trackId`、`url` | 保存原始投递清单的 http/https 链接；空字符串清除。仅用于打开原表，不自动同步。 |
 | `add_node` | `trackId`、`title` | 在已有主线末尾添加节点 |
 | `rename_node` | `trackId`、`nodeId`、`title` | 修改节点名称 |
 | `add_todo` | `title` | `date` 默认今天；`done` 表示完成状态；关联已有主线时同时提供 `trackId`、`nodeId`，并可提供 `nodeTaskId` |

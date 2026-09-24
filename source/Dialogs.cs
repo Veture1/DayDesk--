@@ -229,6 +229,7 @@ namespace DayDesk
                 TrackNode active = currentTrack.Nodes.FirstOrDefault(x => x.Status == "current");
                 TextBlock currentLabel = UI.Text(active == null ? "还没有当前节点" : "现在进行到  ·  " + active.Title, 14, UI.Accent, true);
                 content.Children.Add(Section(currentLabel, "#EAF4EF"));
+                content.Children.Add(UI.Button(currentTrack.ApplicationsEnabled ? "公司投递记录  ·  "+DeskStore.ApplicationSummary(currentTrack) : "公司投递记录…", delegate { ApplicationsDialog.Show(window,store,trackId);render(); }));
 
                 for (int i = 0; i < currentTrack.Nodes.Count; i++)
                 {

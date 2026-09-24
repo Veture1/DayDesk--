@@ -27,7 +27,7 @@ namespace DayDesk
     public class KeyEvent { public string Id { get; set; } public string Title { get; set; } public string Date { get; set; } public string Time { get; set; } public string Repeat { get; set; } public int WeekDay { get; set; } public int MonthDay { get; set; } }
     public class NotebookEntry { public string Id { get; set; } public string Date { get; set; } public string Text { get; set; } public string Color { get; set; } public string SourceNoteId { get; set; } public string SourceText { get; set; } public string SavedAt { get; set; } }
     public class DepartureItem { public string Id { get; set; } public string Title { get; set; } public string DueDate { get; set; } public bool Done { get; set; } }
-    public class Track { public string Id { get; set; } public string Title { get; set; } public string Color { get; set; } public List<TrackNode> Nodes { get; set; } }
+    public class Track { public string Id { get; set; } public string Title { get; set; } public string Color { get; set; } public List<TrackNode> Nodes { get; set; } public bool ApplicationsEnabled { get; set; } public string ApplicationsSourceUrl { get; set; } public List<JobApplication> Applications { get; set; } public Track() { Applications = new List<JobApplication>(); } }
     public class TrackNode { public string Id { get; set; } public string Title { get; set; } public string Status { get; set; } public List<NodeTask> Tasks { get; set; } }
     public class NodeTask { public string Id { get; set; } public string Title { get; set; } public bool Done { get; set; } }
     public class Todo { public string Id { get; set; } public string Title { get; set; } public string Date { get; set; } public bool Done { get; set; } public string TrackId { get; set; } public string NodeId { get; set; } public string NodeTaskId { get; set; } }
@@ -44,7 +44,7 @@ namespace DayDesk
         internal string ResultJson;
     }
 
-    public class DeskStore
+    public partial class DeskStore
     {
         private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024, RecursionLimit = 100 };
         private string undoBefore;
@@ -88,6 +88,7 @@ namespace DayDesk
             if (state.Notebook == null) state.Notebook = new List<NotebookEntry>();
             foreach (NotebookEntry entry in state.Notebook) if (entry != null && entry.SourceText == null) entry.SourceText = entry.Text;
             if (!state.FunReminderEnabled.HasValue) state.FunReminderEnabled = true;
+            if (state.Tracks != null) foreach (Track track in state.Tracks) if (track != null && track.Applications == null) track.Applications = new List<JobApplication>();
         }
 
         private void Load()
@@ -464,6 +465,8 @@ namespace DayDesk
             return json.Serialize(new { schemaVersion = 1, today = Today(), instructions = "请按用户原文生成独立 JSON 更新文件。格式：{id:唯一更新ID,source:来源,operations:[操作]}。主线完全由用户定义，没有固定的主线或节点 ID。操作已有项目时使用下面的准确 ID；不要编造完成记录、推断整章完成或自动推进节点。进度不明确时只 add_note。新建主线可用 add_track 的 nodes 一次提供路线；新 ID 由应用生成，需要再次复制当前数据后才能引用。先 complete_node，再 set_current_node 才表示明确结束上一节点并开始下一节点。", operationSchema = new[] {
                 "add_track: title, nodes?(字符串数组，最多 200 个；首节点 current，其余 pending)",
                 "rename_track: trackId, title",
+                "upsert_application: trackId, company, status(planned/applied/assessment/interview/offer/rejected/watch/no_response), applicationId?, role?, appliedDate?(yyyy-MM-dd或空), notes?；无ID按同一主线的公司+岗位匹配，重复更新不会新增一条；仅记录用户明确的投递状态",
+                "set_applications_source: trackId, url(http/https或空；仅保存清单链接，不自动同步)",
                 "add_node: trackId, title (主线为空时 current，否则 pending)",
                 "rename_node: trackId, nodeId, title",
                 "rename_task: trackId, nodeId, taskId, title (保留自定义待办标题)",
@@ -528,7 +531,9 @@ namespace DayDesk
         private static void ApplyOperation(AppState state, Dictionary<string, object> op, List<string> descriptions)
         {
             string type = Required(op, "type", 40);
-            if (type == "add_event" || type == "update_event")
+            if (type == "upsert_application" || type == "set_applications_source")
+                ApplyApplicationOperation(state, op, type, descriptions);
+            else if (type == "add_event" || type == "update_event")
             {
                 if (type == "add_event") CheckKeys(op, "type", "title", "date", "time", "repeat", "weekDay", "monthDay");
                 else CheckKeys(op, "type", "eventId", "title", "date", "time", "repeat", "weekDay", "monthDay");
@@ -792,6 +797,7 @@ namespace DayDesk
             {
                 if (track == null || String.IsNullOrWhiteSpace(track.Title) || track.Nodes == null) throw new ArgumentException("主线数据无效。");
                 EnsureId(ids, track.Id);
+                ValidateApplications(track, ids);
                 if (track.Nodes.Count(n => n != null && n.Status == "current") > 1) throw new ArgumentException("每条主线最多有一个当前节点。");
                 foreach (TrackNode node in track.Nodes)
                 {

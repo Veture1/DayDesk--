@@ -271,6 +271,37 @@ public static class CoreTests
                 s.SetFunReminderEnabled(false);s.MarkFunReminded(DeskStore.Today());var loaded=new DeskStore(s.DataDirectory);
                 Assert(loaded.State.FunReminderEnabled==false&&loaded.State.LastFunReminderDate==DeskStore.Today(),"Reminder preference and once-a-day date persist");
             });
+            Test("Applications stay within their regional track and preserve routes",delegate {
+                var s=new DeskStore(Path.Combine(root,"applications"));var a=s.AddTrack("地区甲",new[]{"持续投递"});var b=s.AddTrack("地区乙",new[]{"持续投递"});
+                s.SaveApplication(a.Id,new JobApplication{Company="Example",Role="Engineer",Status="applied",AppliedDate="2026-09-23",Notes="已投"});
+                var saved=s.State.Tracks.Single(x=>x.Id==a.Id).Applications.Single();
+                s.SaveApplication(b.Id,new JobApplication{Company="Example",Role="Engineer",Status="planned"});
+                s.SaveApplication(a.Id,new JobApplication{Id=saved.Id,Company="Example",Role="Engineer",Status="interview",AppliedDate=saved.AppliedDate,Notes="面试准备"});
+                var loaded=new DeskStore(s.DataDirectory);
+                Assert(loaded.State.Tracks[0].Applications.Single().Status=="interview"&&loaded.State.Tracks[1].Applications.Single().Status=="planned","Independent regional application status");
+                Assert(loaded.State.Tracks.All(x=>x.Nodes.Single().Status=="current")&&loaded.State.Todos.Count==0,"Company updates do not modify route or create todos");
+                s.DeleteApplication(a.Id,saved.Id);Assert(s.State.Tracks[0].Applications.Count==0&&s.State.Tracks[1].Applications.Count==1,"Delete affects only the selected record");
+            });
+            Test("Invalid application updates are atomic and reject unsafe links",delegate {
+                var s=new DeskStore(Path.Combine(root,"bad-applications"));var a=s.AddTrack("求职",new string[0]);
+                s.SaveApplication(a.Id,new JobApplication{Company="Example",Status="planned"});string before=s.ExportContext();
+                Reject(()=>s.SaveApplication(a.Id,new JobApplication{Company="Example",Status="applied"}),"Duplicate company-role must reject");
+                Reject(()=>s.SaveApplication(a.Id,new JobApplication{Company="Other",Status="guessed"}),"Unknown status must reject");
+                Reject(()=>s.SaveApplication(a.Id,new JobApplication{Company="Other",Status="applied",AppliedDate="2026-02-31"}),"Bad date must reject");
+                Reject(()=>s.SetApplicationsSource(a.Id,"file:///C:/test"),"Non-web source must reject");
+                Assert(s.ExportContext()==before,"Every failed mutation preserves state");
+            });
+            Test("AI application upserts are repeatable, previewed and undoable",delegate {
+                var s=new DeskStore(Path.Combine(root,"ai-applications"));var a=s.AddTrack("求职",new string[0]);
+                var input=Update("company-1",new{type="upsert_application",trackId=a.Id,company="Example",role="Engineer",status="planned",notes="仅考虑过"});
+                var preview=s.PreviewImport(input);Assert(s.State.Tracks[0].Applications.Count==0,"Preview is read-only");s.ApplyImport(preview);
+                s.ApplyImport(s.PreviewImport(Update("company-2",new{type="upsert_application",trackId=a.Id,company="Example",role="Engineer",status="applied",appliedDate="2026-09-23"})));
+                Assert(s.State.Tracks[0].Applications.Count==1&&s.State.Tracks[0].Applications[0].Status=="applied"&&s.State.Tracks[0].Applications[0].Notes=="仅考虑过","Upsert reuses company-role and preserves omitted notes");
+                Assert(s.Undo()&&s.State.Tracks[0].Applications.Single().Status=="planned","Undo restores earlier status");
+                s.SaveApplication(a.Id,new JobApplication{Company="Watching",Status="watch"});s.SaveApplication(a.Id,new JobApplication{Company="Waiting",Status="no_response"});
+                Assert(DeskStore.ApplicationSummary(s.State.Tracks[0]).Contains("已投 1")&&DeskStore.ApplicationSummary(s.State.Tracks[0]).Contains("观望 1"),"Watch is not counted as submitted; no response remains submitted");
+                string before=s.ExportContext();Reject(()=>s.PreviewImport(Update("bad-company",new{type="upsert_application",trackId=a.Id,company="Other",status="applied"},new{type="set_applications_source",trackId=a.Id,url="javascript:alert(1)"})),"Bad later operation rejects whole update");Assert(before==s.ExportContext(),"Failed preview preserves companies");
+            });
             Console.WriteLine("Passed " + passed + " meaningful core tests.");
             return 0;
         }
